@@ -1,6 +1,6 @@
 from django.http import HttpResponse
 from django.core.cache import cache
-from custom_page_cache.utils import hash_key
+from custom_cache_page.utils import hash_key
 
 
 class TestCache:
