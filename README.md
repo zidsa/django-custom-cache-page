@@ -2,7 +2,7 @@ A flexible implementation of Django's [`cache_page`](https://docs.djangoproject.
 
 # Description
 
-This package provides a customizable `cache_page` decorator that that allows you to define your custom key generation functions with a few utilities and invalidate large cache groups on redis at no cost.
+This package provides a customizable `cache_page` decorator that allows you to define your custom key generation functions with a few utilities and invalidate large cache groups on redis at no cost.
 
 ### The story behind this package:
 we used django's default `cache_page` decorator for around a year, it was really easy and quick to set up and it served its purpose, but it was very limiting, it had no way of building custom keys for cached views and that was making it quite impossible to invalidate view caches properly, data inconsistencies appeared everywhere, and we had to build a customizable solution for caching. 
@@ -77,6 +77,12 @@ hashed_key =  hash_key(key)
 ```
 
 ---
+## Running Tests
+ 
+```bash
+pytest
+```
+
 
 ## Development installation
 
