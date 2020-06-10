@@ -10,7 +10,7 @@ setup_args = dict(
     name='django-custom-cache-page',
     version='0.2',
     description='A customizable implementation of Django\'s cache_page decorator.',
-    long_description_content_type="text/plain",
+    long_description_content_type='text/plain',
     long_description=README + '\n\n' + HISTORY,
     license='MIT',
     packages=find_packages(),
@@ -18,7 +18,13 @@ setup_args = dict(
     author_email='i@mhmd.dev',
     keywords=['Django', 'Django Cache', 'cache_page'],
     url='https://github.com/zidsa/django-custom-cache-page',
-    download_url='https://pypi.org/project/django-custom-cache-page/'
+    download_url='https://pypi.org/project/django-custom-cache-page/',
+    classifiers = [
+        'Programming Language :: Python :: 3 :: Only',
+        'Framework :: Django',
+        'Operating System :: OS Independent',
+        'License :: OSI Approved :: MIT License',
+    ]
 )
 
 install_requires = [
