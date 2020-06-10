@@ -8,7 +8,7 @@ with open('HISTORY.md') as history_file:
 
 setup_args = dict(
     name='django-custom-cache-page',
-    version='0.1',
+    version='0.2',
     description='A customizable implementation of Django\'s cache_page decorator.',
     long_description_content_type="text/plain",
     long_description=README + '\n\n' + HISTORY,
