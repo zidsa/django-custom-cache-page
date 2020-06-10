@@ -5,7 +5,7 @@ from django.http import HttpResponse
 from django.test import RequestFactory
 from pytest_django.lazy_django import django_settings_is_configured
 
-from custom_page_cache.cache import cache_page
+from custom_cache_page.cache import cache_page
 
 
 @pytest.fixture(autouse=True)

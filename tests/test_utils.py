@@ -1,6 +1,6 @@
 from django.core.cache import cache
 
-from custom_page_cache.utils import generate_query_params_cache_key, generate_cache_key, invalidate_group_caches
+from custom_cache_page.utils import generate_query_params_cache_key, generate_cache_key, invalidate_group_caches
 
 
 class TestUtils:
