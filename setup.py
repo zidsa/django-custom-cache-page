@@ -38,7 +38,8 @@ if __name__ == '__main__':
               'dev': [
                   'pytest',
                   'pytest-pep8',
-                  'pytest-cov'
+                  'pytest-cov',
+                  'pytest-django',
               ]
           }
     )
