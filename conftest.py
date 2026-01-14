@@ -15,8 +15,8 @@ def configure_django_settings():
         settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
         settings.CACHES = {
             "default": {
-                "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
-                "LOCATION": "/var/tmp/cache",
+                "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+                "LOCATION": "unique-snowflake",
             }
         }
     yield
