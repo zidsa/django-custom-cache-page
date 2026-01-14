@@ -12,11 +12,11 @@ from custom_cache_page.cache import cache_page
 def configure_django_settings():
     if not django_settings_is_configured():
         settings.configure()
-        settings.EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
+        settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
         settings.CACHES = {
-            'default': {
-                'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
-                'LOCATION': '/var/tmp/cache',
+            "default": {
+                "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+                "LOCATION": "/var/tmp/cache",
             }
         }
     yield
@@ -40,9 +40,10 @@ def mock_cached_view():
         timeout=1200,
         key_func=lambda r: r.path,
         versioned=False,
-        group_func=lambda r: 'cached_views',
-        prefix='prefix'
+        group_func=lambda r: "cached_views",
+        prefix="prefix",
     )
     def mocked_cached_view(request, *args, **kwargs):
-        return HttpResponse('hi')
+        return HttpResponse(b"hi")
+
     return mocked_cached_view
