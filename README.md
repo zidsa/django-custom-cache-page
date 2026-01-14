@@ -53,7 +53,7 @@ from custom_cache_page.cache import cache_page
 @cache_page(
         timeout=60 * 60,
         key_func=lambda r: r.path,
-        versioned=False,
+        versioned=True,  # Required for invalidate_group_caches to work
         group_func=lambda r: 'cached_views',
         prefix='prefix'
 )
@@ -66,6 +66,8 @@ from custom_cache_page.utils import invalidate_group_caches
 
 invalidate_group_caches('cached_views')
 ```
+
+**Note:** `versioned=True` is required for `invalidate_group_caches` to work. When versioned is enabled, the cache key includes a version number that gets incremented when you call `invalidate_group_caches`, effectively invalidating all cached entries in that group.
 
 ## Hashed keys:
 
