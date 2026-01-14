@@ -8,9 +8,9 @@ with open('HISTORY.md') as history_file:
 
 setup_args = dict(
     name='django-custom-cache-page',
-    version='0.3',
+    version='0.4',
     description='A customizable implementation of Django\'s cache_page decorator.',
-    long_description_content_type='text/plain',
+    long_description_content_type='text/markdown',
     long_description=README + '\n\n' + HISTORY,
     license='MIT',
     packages=find_packages(),
@@ -19,16 +19,26 @@ setup_args = dict(
     keywords=['Django', 'Django Cache', 'cache_page'],
     url='https://github.com/zidsa/django-custom-cache-page',
     download_url='https://pypi.org/project/django-custom-cache-page/',
-    classifiers = [
-        'Programming Language :: Python :: 3 :: Only',
+    python_requires='>=3.9',
+    classifiers=[
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
         'Framework :: Django',
+        'Framework :: Django :: 4.2',
+        'Framework :: Django :: 5.0',
+        'Framework :: Django :: 5.1',
+        'Framework :: Django :: 6.0',
         'Operating System :: OS Independent',
         'License :: OSI Approved :: MIT License',
     ]
 )
 
 install_requires = [
-    'django>=2.0',
+    'django>=4.2',
 ]
 
 if __name__ == '__main__':
@@ -37,7 +47,6 @@ if __name__ == '__main__':
           extras_require={
               'dev': [
                   'pytest',
-                  'pytest-pep8',
                   'pytest-cov',
                   'pytest-django',
               ]
