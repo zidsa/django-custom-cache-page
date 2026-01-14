@@ -8,15 +8,21 @@ with open("HISTORY.md") as history_file:
 
 setup_args = dict(
     name="django-custom-cache-page",
-    version="0.4",
-    description="A customizable implementation of Django's cache_page decorator.",
+    version="1.0.0",
+    description="A customizable cache_page decorator with surrogate-key support and pluggable backends.",
     long_description_content_type="text/markdown",
     long_description=README + "\n\n" + HISTORY,
     license="MIT",
     packages=find_packages(),
     author="Mohamad Bahamdain",
     author_email="i@mhmd.dev",
-    keywords=["Django", "Django Cache", "cache_page"],
+    keywords=[
+        "Django",
+        "Django Cache",
+        "cache_page",
+        "surrogate-key",
+        "cache invalidation",
+    ],
     url="https://github.com/zidsa/django-custom-cache-page",
     download_url="https://pypi.org/project/django-custom-cache-page/",
     python_requires=">=3.9",
@@ -46,10 +52,17 @@ if __name__ == "__main__":
         **setup_args,
         install_requires=install_requires,
         extras_require={
+            "redis": [
+                "redis>=5.0",
+            ],
             "dev": [
                 "pytest",
                 "pytest-cov",
                 "pytest-django",
-            ]
+                "redis>=5.0",
+                "ruff",
+                "pyright",
+                "tox",
+            ],
         },
     )

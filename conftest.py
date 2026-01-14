@@ -5,7 +5,7 @@ from django.http import HttpResponse
 from django.test import RequestFactory
 from pytest_django.lazy_django import django_settings_is_configured
 
-from custom_cache_page.cache import cache_page
+from custom_cache_page import cache_page
 
 
 @pytest.fixture(autouse=True)
@@ -39,8 +39,7 @@ def mock_cached_view():
     @cache_page(
         timeout=1200,
         key_func=lambda r: r.path,
-        versioned=False,
-        group_func=lambda r: "cached_views",
+        tags=["cached_views"],
         prefix="prefix",
     )
     def mocked_cached_view(request, *args, **kwargs):
