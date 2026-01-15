@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/pypi/pyversions/django-custom-cache-page)](https://pypi.org/project/django-custom-cache-page/)
 [![Django](https://img.shields.io/badge/django-4.2%20%7C%205.0%20%7C%205.1%20%7C%206.0-blue)](https://pypi.org/project/django-custom-cache-page/)
-[![Coverage](https://codecov.io/gh/zidsa/django-custom-cache-page/graph/badge.svg)](https://codecov.io/gh/zidsa/django-custom-cache-page)
+[![Coverage](https://coveralls.io/repos/github/zidsa/django-custom-cache-page/badge.svg?branch=master)](https://coveralls.io/github/zidsa/django-custom-cache-page?branch=master)
 [![License](https://img.shields.io/github/license/zidsa/django-custom-cache-page)](https://github.com/zidsa/django-custom-cache-page/blob/master/LICENSE)
 
 A `cache_page` decorator that gives you control over cache keys and invalidation.
