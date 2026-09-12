@@ -151,9 +151,9 @@ def test_cookie_and_streaming_responses_are_not_cached(request_factory, etag, ki
             return StreamingHttpResponse([b"product"])
         result = JsonResponse(state["value"])
         if kind == "cookie":
-            result.set_cookie("session", "customer")
+            result.set_cookie("session", "sample")
         else:
-            result["Set-Cookie"] = "session=customer"
+            result["Set-Cookie"] = "session=sample"
         return result
 
     view, state = make_view(etag=etag, response=response)
@@ -176,11 +176,11 @@ def test_unknown_vary_refuses_cache(request_factory, header):
 @pytest.mark.parametrize("etag", [False, True])
 def test_request_no_store_and_only_if_bypass(request_factory, etag):
     view, state = make_view(
-        etag=etag, only_if=lambda r: not r.headers.get("X-Customer")
+        etag=etag, only_if=lambda r: not r.headers.get("X-Bypass-Cache")
     )
     public = view(request_factory.get("/products"))
     assert public.status_code == 200
-    for kwargs in ({"HTTP_CACHE_CONTROL": "no-store"}, {"HTTP_X_CUSTOMER": "one"}):
+    for kwargs in ({"HTTP_CACHE_CONTROL": "no-store"}, {"HTTP_X_BYPASS_CACHE": "1"}):
         response = view(request_factory.get("/products", **kwargs))
         assert response["Cache-Control"] == "no-store"
     assert state["calls"] == 3
@@ -203,23 +203,25 @@ def test_other_methods_bypass_get_snapshot(request_factory, method):
 def test_variants_use_effective_headers_and_preserve_url_dimensions(request_factory):
     view, state = make_view(
         etag=True,
-        vary_on=("Country", "Role", "Content-Type"),
+        vary_on=("Accept-Language", "X-Theme", "Content-Type"),
         key_func=lambda r: "same-key",
     )
     requests = [
-        request_factory.get("/products?a=1&a=2", HTTP_COUNTRY="SA"),
-        request_factory.get("/products?a=1&a=2", HTTP_COUNTRY="AE"),
-        request_factory.get("/products?a=2&a=1", HTTP_COUNTRY="SA"),
+        request_factory.get("/products?a=1&a=2", HTTP_ACCEPT_LANGUAGE="en"),
+        request_factory.get("/products?a=1&a=2", HTTP_ACCEPT_LANGUAGE="fr"),
+        request_factory.get("/products?a=2&a=1", HTTP_ACCEPT_LANGUAGE="en"),
         request_factory.get(
-            "/products?a=1&a=2", HTTP_COUNTRY="SA", HTTP_HOST="other.example"
+            "/products?a=1&a=2", HTTP_ACCEPT_LANGUAGE="en", HTTP_HOST="other.example"
         ),
         request_factory.get(
-            "/products?a=1&a=2", HTTP_COUNTRY="SA", CONTENT_TYPE="application/json"
+            "/products?a=1&a=2",
+            HTTP_ACCEPT_LANGUAGE="en",
+            CONTENT_TYPE="application/json",
         ),
-        request_factory.get("/products?a=1&a=2", HTTP_COUNTRY="SA"),
+        request_factory.get("/products?a=1&a=2", HTTP_ACCEPT_LANGUAGE="en"),
     ]
     _ = requests[-1].headers
-    requests[-1].META["HTTP_ROLE"] = "customer"
+    requests[-1].META["HTTP_X_THEME"] = "dark"
     for request in requests:
         view(request)
         view(request)
@@ -296,7 +298,7 @@ def test_no_cache_response_rebuilds_each_request(request_factory, clock):
 
 def test_runtime_flag_off_does_not_validate_existing_tagged_entry(request_factory):
     enabled = [True]
-    view, state = make_view(etag=lambda r: enabled[0], vary_on=("Country",))
+    view, state = make_view(etag=lambda r: enabled[0], vary_on=("Accept-Language",))
     first = view(request_factory.get("/products"))
     enabled[0] = False
     assert (
@@ -310,7 +312,7 @@ def test_runtime_flag_off_does_not_validate_existing_tagged_entry(request_factor
 
 def test_enabling_flag_rebuilds_entry_without_validator(request_factory):
     enabled = [False]
-    view, state = make_view(etag=lambda r: enabled[0], vary_on=("Country",))
+    view, state = make_view(etag=lambda r: enabled[0], vary_on=("Accept-Language",))
     first = view(request_factory.get("/products"))
     assert "ETag" not in first
     enabled[0] = True
@@ -349,7 +351,7 @@ def test_post_render_cookie_policy_refuses_admission(request_factory):
     def response(request, state):
         result = JsonTemplateResponse(None, content_type="application/json")
         result.add_post_render_callback(
-            lambda value: value.set_cookie("customer", "one")
+            lambda value: value.set_cookie("session", "sample")
         )
         return result
 

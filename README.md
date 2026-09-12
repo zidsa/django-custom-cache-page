@@ -170,7 +170,7 @@ Enable conditional GET responses for clients that retain response bodies:
     key_func=lambda request: request.path,
     tags=[versioned("catalog")],
     etag=True,                   # Also accepts callable(request) -> bool
-    vary_on=("Accept-Language", "Currency", "Country"),
+    vary_on=("Accept-Language", "X-Theme"),
     max_age=300,                  # Maximum outbound freshness, optional
     only_if=lambda request: request.user.is_anonymous,
 )
