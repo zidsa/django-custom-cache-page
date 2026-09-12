@@ -3,13 +3,13 @@ from django.http import HttpResponse
 from custom_cache_page import (
     Versioned,
     cache_page,
+    conf,
     invalidate_tag,
     invalidate_tags,
     versioned,
 )
 from custom_cache_page.backends.base import BaseCacheBackend
 from custom_cache_page.backends.django import DjangoCacheBackend
-from custom_cache_page import conf
 
 
 class TestVersioned:
@@ -187,7 +187,9 @@ class TestCachePage:
         request = request_factory.get("/timeout-callable")
         response = view(request)
         assert response.status_code == 200
-        assert "max-age=600" in response.get("Cache-Control", "")
+        assert any(
+            f"max-age={age}" in response.get("Cache-Control", "") for age in (599, 600)
+        )
 
 
 class TestCachePageTags:

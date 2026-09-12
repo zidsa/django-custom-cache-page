@@ -71,13 +71,13 @@ class TestDjangoCacheBackend:
         backend = DjangoCacheBackend(cache_name="default")
 
         v1 = backend.get_group_version("test-group", timeout=300)
-        assert v1 == 1
+        assert 0 < v1 <= 2**60
 
         v2 = backend.increment_group_version("test-group")
-        assert v2 == 2
+        assert v2 == v1 + 1
 
         v3 = backend.get_group_version("test-group", timeout=300)
-        assert v3 == 2
+        assert v3 == v2
 
     def test_prepare_response_unchanged(self):
         backend = DjangoCacheBackend(cache_name="default")

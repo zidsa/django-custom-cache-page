@@ -160,6 +160,90 @@ def my_view(request):
     ...
 ```
 
+### HTTP validation
+
+Enable conditional GET responses for clients that retain response bodies:
+
+```python
+@cache_page(
+    timeout=3600,                 # Origin snapshot storage lifetime
+    key_func=lambda request: request.path,
+    tags=[versioned("catalog")],
+    etag=True,                   # Also accepts callable(request) -> bool
+    vary_on=("Accept-Language", "Currency", "Country"),
+    max_age=300,                  # Maximum outbound freshness, optional
+    only_if=lambda request: request.user.is_anonymous,
+)
+def catalog(request):
+    return JsonResponse({"products": [...]})
+```
+
+The first response includes a weak `ETag`. A later `If-None-Match` request
+receives a bodyless `304` when the selected representation is unchanged. The
+decorator checks a fresh origin snapshot without running or rendering the view.
+An expired snapshot, invalidated tag, `_bust_cache`, or `Cache-Control: no-cache`
+request rebuilds the response before comparing its validator. If that rebuild
+changes the representation, the client receives the complete new `200` body.
+Errors never validate or revive the previous snapshot.
+
+JSON validators ignore object-key order and whitespace, while preserving array
+order. Other response bodies use a weak hash of their bytes. Compression
+middleware should run after the decorator so JSON hashing is independent of
+compression output. The default backend stores bytes, including binary bodies.
+
+`vary_on` adds the named request headers to the key, together with the full URL
+and host, and emits `Vary`. Header values are read from effective `request.META`.
+This key isolation also applies when `etag` is false and `vary_on` is supplied.
+The caller must include **every** header that can affect a representation, and
+must use `only_if` to exclude personalized responses or provide appropriate
+identity isolation. There are no application-specific credential rules in the
+package. Surrogate tags group entries for invalidation; ordinary tags do not
+make their cache keys distinct.
+
+All modes refuse non-GET requests, request `no-store`, and response `private`,
+`no-store`, cookies, or streaming responses. Bypasses emit `Cache-Control:
+no-store`. With HTTP validation enabled, an unsupported `Vary` value (including
+`*`) also prevents storage. `only_if` is evaluated before cache lookup.
+
+Stored snapshot metadata accounts for origin `Date`, `Age`, explicit
+`max-age`/`s-maxage`, and `Expires`. Each response advertises only remaining
+freshness, capped by `max_age` if provided; time in the origin cache does not
+restart a full freshness interval. When both `max-age` and `s-maxage` exist,
+their smaller remaining lifetime is used conservatively. Ambiguous duplicate
+freshness directives produce zero freshness. Response `no-cache` always requires
+a rebuild. Outbound `Date` is current and `Age` is zero because advertised
+remaining freshness already includes the stored response's age.
+
+The ETag feature flag controls both generation and conditional `304` responses.
+Turning it off never validates a previously tagged entry; turning it on rebuilds
+an entry that lacks a validator. `max_age` affects outgoing freshness, not the
+configured cache storage TTL. Stronger response freshness directives can force
+a rebuild before that storage TTL expires.
+
+Custom backends must round-trip `CacheEntry.metadata` as the returned response's
+`_cache_page_metadata` attribute, plus cache-policy headers. An entry without
+metadata is rebuilt safely. `DjangoCacheBackend` implements this contract.
+Request attributes `_cache_page_status` (`hit`, `miss`, or `bypass`) and
+`_cache_page_key` are available to application diagnostics; no diagnostic headers
+are emitted by the package.
+
+#### Upgrading an existing cache
+
+Old response entries without freshness metadata refill once. The default mode
+also gains the request/response safety checks and remaining-freshness behavior
+above; `etag=False` continues to serve full responses without generating a new
+validator. Existing integer version counters and raw group names are preserved
+for callers using Django's `cache.incr(group)` directly. A missing counter starts
+with a random positive integer generation, preventing old cache entries from
+reappearing after counter expiry or eviction. Do not assume the first version is
+`1` or reset a counter to an earlier value.
+
+Versioned tags no longer add every response to a surrogate index: invalidating
+them increments their generation in O(1). Ordinary tags are indexed and purged,
+including when the same tag name is also used by versioned entries. Missing
+groups passed directly to `increment_group_version()` raise `ValueError`; use
+`invalidate_tag()` for either tag kind.
+
 ## Key Generation Utilities
 
 Built-in key generators:

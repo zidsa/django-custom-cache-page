@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+import secrets
+from typing import Any, Optional, cast
 
 from django.core.cache import caches
 from django.http import HttpResponse
@@ -67,20 +68,33 @@ class DjangoCacheBackend(BaseCacheBackend):
         )
         for header, value in cached.get("headers", {}).items():
             response[header] = value
+        setattr(response, "_cache_page_metadata", cached.get("metadata", {}))
         return response
 
     def set(self, entry: CacheEntry) -> None:
         response = entry.response
         headers = {}
-        for header in ["Cache-Control", "Expires", "ETag", "Last-Modified", "Vary"]:
+        for header in [
+            "Cache-Control",
+            "Expires",
+            "ETag",
+            "Last-Modified",
+            "Vary",
+            "Date",
+            "Age",
+            "Content-Language",
+            "Content-Location",
+            "Content-Encoding",
+        ]:
             if header in response:
                 headers[header] = response[header]
 
         serialized = {
-            "content": response.content.decode("utf-8"),
+            "content": response.content,
             "content_type": response.get("Content-Type", "text/html"),
             "status_code": response.status_code,
             "headers": headers,
+            "metadata": entry.metadata,
         }
         self.cache.set(entry.key, serialized, entry.timeout)
         for surrogate in entry.surrogate_keys:
@@ -103,11 +117,17 @@ class DjangoCacheBackend(BaseCacheBackend):
         return count
 
     def get_group_version(self, group: str, timeout: int) -> int:
-        return self.cache.get_or_set(group, 1, timeout=timeout)
+        # A missing/evicted counter must never return to an earlier generation.
+        # Keep integers and raw group names for existing cache.incr callers; 60
+        # bits leave ample increment headroom within Redis's signed 64-bit range.
+        return cast(
+            int,
+            self.cache.get_or_set(
+                group, lambda: secrets.randbits(60) + 1, timeout=timeout
+            ),
+        )
 
     def increment_group_version(self, group: str) -> int:
-        try:
-            return self.cache.incr(group)
-        except ValueError:
-            self.cache.set(group, 2)
-            return 2
+        # Missing groups are ordinary tags or expired counters. Ordinary tags
+        # are purged by their index; an expired counter gets a new epoch on read.
+        return self.cache.incr(group)
