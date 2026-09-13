@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import secrets
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 from django.core.cache import caches
 from django.http import HttpResponse
@@ -80,8 +80,6 @@ class DjangoCacheBackend(BaseCacheBackend):
             "ETag",
             "Last-Modified",
             "Vary",
-            "Date",
-            "Age",
             "Content-Language",
             "Content-Location",
             "Content-Encoding",
@@ -117,17 +115,10 @@ class DjangoCacheBackend(BaseCacheBackend):
         return count
 
     def get_group_version(self, group: str, timeout: int) -> int:
-        # A missing/evicted counter must never return to an earlier generation.
-        # Keep integers and raw group names for existing cache.incr callers; 60
-        # bits leave ample increment headroom within Redis's signed 64-bit range.
-        return cast(
-            int,
-            self.cache.get_or_set(
-                group, lambda: secrets.randbits(60) + 1, timeout=timeout
-            ),
+        # An expired counter must not restart at a generation stale entries used.
+        return self.cache.get_or_set(
+            group, lambda: secrets.randbits(60) + 1, timeout=timeout
         )
 
     def increment_group_version(self, group: str) -> int:
-        # Missing groups are ordinary tags or expired counters. Ordinary tags
-        # are purged by their index; an expired counter gets a new epoch on read.
         return self.cache.incr(group)

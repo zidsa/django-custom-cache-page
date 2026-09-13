@@ -46,7 +46,7 @@ def test_matching_validator_skips_view_and_returns_bodyless_304(request_factory,
     view, state = make_view(etag=True, max_age=300)
     first = view(request_factory.get("/products/1"))
     assert first["ETag"].startswith('W/"')
-    assert first["Cache-Control"] == "max-age=300, must-revalidate"
+    assert first["Cache-Control"] == "max-age=300"
     clock[0] += 90
     second = view(request_factory.get("/products/1", HTTP_IF_NONE_MATCH=first["ETag"]))
     assert second.status_code == 304
@@ -105,7 +105,7 @@ def test_expired_metadata_cannot_validate_even_if_cache_entry_survives(
     request = request_factory.get("/products")
     first = view(request)
     cached = cache.get(request._cache_page_key)
-    cached["metadata"]["expires_at"] = clock[0] - 1
+    cached["metadata"]["fresh_until"] = clock[0] - 1
     cache.set(request._cache_page_key, cached, 3600)
     second = view(request_factory.get("/products", HTTP_IF_NONE_MATCH=first["ETag"]))
     assert second.status_code == 304
@@ -138,7 +138,7 @@ def test_private_and_no_store_responses_never_enter_cache(
         return JsonResponse(state["value"], headers={"Cache-Control": policy})
 
     view, state = make_view(etag=etag, response=response)
-    assert view(request_factory.get("/products"))["Cache-Control"] == "no-store"
+    assert view(request_factory.get("/products"))["Cache-Control"] == policy
     view(request_factory.get("/products"))
     assert state["calls"] == 2
 
@@ -163,14 +163,25 @@ def test_cookie_and_streaming_responses_are_not_cached(request_factory, etag, ki
 
 
 @pytest.mark.parametrize("header", ["*", "X-Unknown"])
-def test_unknown_vary_refuses_cache(request_factory, header):
+def test_unknown_vary_refuses_cache_when_representations_are_keyed(
+    request_factory, header
+):
     view, state = make_view(
         etag=True,
         response=lambda r, s: JsonResponse(s["value"], headers={"Vary": header}),
     )
-    assert view(request_factory.get("/products"))["Cache-Control"] == "no-store"
+    assert "Cache-Control" not in view(request_factory.get("/products"))
     view(request_factory.get("/products"))
     assert state["calls"] == 2
+
+
+def test_legacy_mode_ignores_response_vary(request_factory):
+    view, state = make_view(
+        response=lambda r, s: JsonResponse(s["value"], headers={"Vary": "Accept"}),
+    )
+    view(request_factory.get("/products"))
+    assert view(request_factory.get("/products"))["Vary"] == "Accept"
+    assert state["calls"] == 1
 
 
 @pytest.mark.parametrize("etag", [False, True])
@@ -180,24 +191,66 @@ def test_request_no_store_and_only_if_bypass(request_factory, etag):
     )
     public = view(request_factory.get("/products"))
     assert public.status_code == 200
-    for kwargs in ({"HTTP_CACHE_CONTROL": "no-store"}, {"HTTP_X_BYPASS_CACHE": "1"}):
-        response = view(request_factory.get("/products", **kwargs))
-        assert response["Cache-Control"] == "no-store"
+    no_store = view(request_factory.get("/products", HTTP_CACHE_CONTROL="no-store"))
+    assert "Cache-Control" not in no_store
+    bypassed = view(request_factory.get("/products", HTTP_X_BYPASS_CACHE="1"))
+    assert bypassed["Cache-Control"] == "no-store"
     assert state["calls"] == 3
     view(request_factory.get("/products"))
     assert state["calls"] == 3
 
 
-@pytest.mark.parametrize("method", ["post", "head"])
-def test_other_methods_bypass_get_snapshot(request_factory, method):
+def test_post_bypasses_get_snapshot(request_factory):
     view, state = make_view(etag=True)
     first = view(request_factory.get("/products"))
-    result = view(
-        getattr(request_factory, method)("/products", HTTP_IF_NONE_MATCH=first["ETag"])
-    )
+    result = view(request_factory.post("/products", HTTP_IF_NONE_MATCH=first["ETag"]))
     assert result.status_code == 200
-    assert result["Cache-Control"] == "no-store"
+    assert "Cache-Control" not in result
     assert state["calls"] == 2
+
+
+def test_head_reads_get_snapshot_but_never_stores(request_factory):
+    view, state = make_view(etag=True)
+    miss = view(request_factory.head("/products"))
+    assert "ETag" not in miss
+    assert view(request_factory.head("/products")).status_code == 200
+    assert state["calls"] == 2
+    first = view(request_factory.get("/products"))
+    head = view(request_factory.head("/products"))
+    assert head["ETag"] == first["ETag"]
+    assert head["Cache-Control"] == first["Cache-Control"]
+    conditional = view(
+        request_factory.head("/products", HTTP_IF_NONE_MATCH=first["ETag"])
+    )
+    assert conditional.status_code == 304
+    assert state["calls"] == 3
+
+
+def test_last_modified_supports_if_modified_since(request_factory, clock):
+    modified = http_date(clock[0] - 100)
+    view, state = make_view(
+        etag=True,
+        response=lambda r, s: JsonResponse(
+            s["value"], headers={"Last-Modified": modified}
+        ),
+    )
+    first = view(request_factory.get("/products"))
+    assert first["Last-Modified"] == modified
+    assert (
+        view(
+            request_factory.get("/products", HTTP_IF_MODIFIED_SINCE=modified)
+        ).status_code
+        == 304
+    )
+    assert (
+        view(
+            request_factory.get(
+                "/products", HTTP_IF_MODIFIED_SINCE=http_date(clock[0] - 200)
+            )
+        ).status_code
+        == 200
+    )
+    assert state["calls"] == 1
 
 
 def test_variants_use_effective_headers_and_preserve_url_dimensions(request_factory):
@@ -243,10 +296,10 @@ def test_cached_max_age_counts_down_from_snapshot(request_factory, clock, etag):
     assert http_cache.cache_policy(second["Cache-Control"]) == {
         "max-age": "10",
         "s-maxage": "10",
-        "must-revalidate": "",
     }
     assert second["Date"] == http_date(clock[0])
-    assert second["Age"] == "0"
+    assert "Age" not in second
+    assert "Vary" not in second
     clock[0] += 11
     view(request_factory.get("/products"))
     assert state["calls"] == 2
@@ -356,9 +409,7 @@ def test_post_render_cookie_policy_refuses_admission(request_factory):
         return result
 
     view, state = make_view(etag=True, response=response)
-    assert (
-        view(request_factory.get("/products")).render()["Cache-Control"] == "no-store"
-    )
+    assert "Cache-Control" not in view(request_factory.get("/products")).render()
     view(request_factory.get("/products")).render()
     assert state["calls"] == 2
 
@@ -368,7 +419,9 @@ def test_invalid_json_returns_body_without_caching_or_validator(request_factory)
         etag=True,
         response=lambda r, s: HttpResponse(b"broken", content_type="application/json"),
     )
-    assert view(request_factory.get("/products"))["Cache-Control"] == "no-store"
+    response = view(request_factory.get("/products"))
+    assert "Cache-Control" not in response
+    assert "ETag" not in response
     view(request_factory.get("/products"))
     assert state["calls"] == 2
 
@@ -520,7 +573,7 @@ def test_invalid_age_header_cannot_make_old_payload_fresh(request_factory, clock
     assert state["calls"] == 2
 
 
-def test_bypass_no_store_survives_a_view_post_render_policy_callback(request_factory):
+def test_bypass_keeps_a_view_policy_set_after_rendering(request_factory):
     def response(request, state):
         result = JsonTemplateResponse(None, content_type="application/json")
 
@@ -531,9 +584,47 @@ def test_bypass_no_store_survives_a_view_post_render_policy_callback(request_fac
         return result
 
     view, state = make_view(etag=True, only_if=lambda r: False, response=response)
-    assert (
-        view(request_factory.get("/products")).render()["Cache-Control"] == "no-store"
+    rendered = view(request_factory.get("/products")).render()
+    assert rendered["Cache-Control"] == "public, max-age=100"
+    assert "ETag" not in rendered
+    assert state["calls"] == 1
+
+
+def test_view_etag_is_kept_as_validator(request_factory):
+    view, state = make_view(
+        etag=True,
+        response=lambda r, s: JsonResponse(s["value"], headers={"ETag": '"v1"'}),
     )
+    first = view(request_factory.get("/products"))
+    assert first["ETag"] == '"v1"'
+    assert (
+        view(request_factory.get("/products", HTTP_IF_NONE_MATCH='"v1"')).status_code
+        == 304
+    )
+    assert state["calls"] == 1
+
+
+@pytest.mark.parametrize("policy", [None, "public", "s-maxage=60", "must-revalidate"])
+def test_authorized_responses_store_only_with_shared_cache_directives(
+    request_factory, policy
+):
+    def response(request, state):
+        headers = {"Cache-Control": policy} if policy else {}
+        return JsonResponse(state["value"], headers=headers)
+
+    view, state = make_view(etag=True, response=response)
+    view(request_factory.get("/products", HTTP_AUTHORIZATION="Bearer token"))
+    view(request_factory.get("/products", HTTP_AUTHORIZATION="Bearer token"))
+    assert state["calls"] == (2 if policy is None else 1)
+
+
+def test_authorized_request_reuses_anonymous_snapshot(request_factory):
+    view, state = make_view(etag=True)
+    first = view(request_factory.get("/products"))
+    authorized = view(
+        request_factory.get("/products", HTTP_AUTHORIZATION="Bearer token")
+    )
+    assert authorized["ETag"] == first["ETag"]
     assert state["calls"] == 1
 
 

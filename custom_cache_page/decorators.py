@@ -3,6 +3,7 @@ from functools import wraps
 from typing import Callable, Optional, Union
 
 from django.http import HttpRequest, HttpResponse
+from django.template.response import SimpleTemplateResponse
 
 from .backends.base import BaseCacheBackend, CacheEntry
 from .conf import get_backend_by_name, get_default_backend
@@ -124,16 +125,16 @@ def cache_page(
         @wraps(view_func)
         def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
             use_etag = etag(request) if callable(etag) else etag
+            check_vary = use_etag or bool(vary_on)
             setattr(request, "_cache_page_status", "bypass")
             setattr(request, "_cache_page_key", None)
-            if (
-                getattr(request, "do_not_cache", False)
-                or (only_if is not None and not only_if(request))
-                or not request_allows_cache(request)
+            setattr(request, "_cache_update_cache", False)
+            if getattr(request, "do_not_cache", False) or (
+                only_if is not None and not only_if(request)
             ):
-                response = view_func(request, *args, **kwargs)
-                setattr(request, "_cache_update_cache", False)
-                return forbid_cache(response)
+                return forbid_cache(view_func(request, *args, **kwargs))
+            if not request_allows_cache(request):
+                return view_func(request, *args, **kwargs)
 
             resolved_backend = _resolve_backend(backend, cache_name)
             resolved_tags, versioned_tags, indexed_tags = _resolve_tags(request, tags)
@@ -144,73 +145,69 @@ def cache_page(
                 versioned_tags=versioned_tags,
                 backend=resolved_backend,
             )
-            if use_etag or vary_on:
+            if check_vary:
                 cache_key = representation_key(request, cache_key, vary_on)
             setattr(request, "_cache_page_key", cache_key)
+
             cached_response = resolved_backend.get(cache_key)
-            rebuild = getattr(request, "_bust_cache", False)
             if cached_response is not None:
-                rebuild = (
-                    rebuild
+                metadata = getattr(cached_response, "_cache_page_metadata", {})
+                if not (
+                    getattr(request, "_bust_cache", False)
                     or request_requires_revalidation(request)
-                    or snapshot_requires_rebuild(cached_response, etag=use_etag)
-                    or not response_allows_cache(
-                        cached_response, vary_on, check_vary=use_etag or bool(vary_on)
+                    or snapshot_requires_rebuild(
+                        cached_response, metadata, etag=use_etag
                     )
-                )
-            if cached_response is not None and not rebuild:
-                setattr(request, "_cache_page_status", "hit")
-                setattr(request, "_cache_update_cache", False)
-                return validate_cached_response(
-                    request,
-                    cached_response,
-                    getattr(cached_response, "_cache_page_metadata"),
-                    vary_on=vary_on,
-                    max_age=max_age,
-                    conditional=use_etag,
-                )
-            if cached_response is not None:
-                # Rebuild first even when the client sent the old ETag. Deleting
-                # prevents a failed or newly uncacheable rebuild reviving it.
+                    or not response_allows_cache(
+                        cached_response, vary_on, check_vary=check_vary
+                    )
+                ):
+                    setattr(request, "_cache_page_status", "hit")
+                    return validate_cached_response(
+                        request,
+                        cached_response,
+                        metadata,
+                        vary_on=vary_on,
+                        max_age=max_age,
+                        conditional=use_etag,
+                    )
                 resolved_backend.delete(cache_key)
 
             setattr(request, "_cache_page_status", "miss")
             response = view_func(request, *args, **kwargs)
-            setattr(request, "_cache_update_cache", False)
-            if response.status_code != 200:
+            if request.method != "GET" or response.status_code != 200:
                 return response
-            if not response_allows_cache(
-                response, vary_on, check_vary=use_etag or bool(vary_on)
-            ):
-                return forbid_cache(response)
 
-            def store_response(rendered_response):
-                resolved_timeout = (
-                    timeout(rendered_response) if callable(timeout) else timeout
-                )
+            def store_response(rendered_response: HttpResponse) -> HttpResponse:
+                if not response_allows_cache(
+                    rendered_response,
+                    vary_on,
+                    check_vary=check_vary,
+                    authorized="HTTP_AUTHORIZATION" in request.META,
+                ):
+                    return rendered_response
                 final_response = resolved_backend.prepare_response(
                     rendered_response, resolved_tags.keys
                 )
-                if not response_allows_cache(
-                    final_response, vary_on, check_vary=use_etag or bool(vary_on)
-                ):
-                    return forbid_cache(final_response)
+                resolved_timeout = (
+                    timeout(final_response) if callable(timeout) else timeout
+                )
                 try:
                     metadata = make_metadata(
                         final_response, resolved_timeout, etag=use_etag
                     )
-                except (ValueError, TypeError, UnicodeDecodeError):
-                    # Invalid JSON cannot receive a canonical validator.
-                    return forbid_cache(final_response)
+                except ValueError:
+                    return final_response
                 setattr(final_response, "_cache_page_metadata", metadata)
-                entry = CacheEntry(
-                    key=cache_key,
-                    response=final_response,
-                    timeout=resolved_timeout,
-                    surrogate_keys=indexed_tags.keys,
-                    metadata=metadata,
+                resolved_backend.set(
+                    CacheEntry(
+                        key=cache_key,
+                        response=final_response,
+                        timeout=resolved_timeout,
+                        surrogate_keys=indexed_tags.keys,
+                        metadata=metadata,
+                    )
                 )
-                resolved_backend.set(entry)
                 return validate_cached_response(
                     request,
                     final_response,
@@ -221,14 +218,12 @@ def cache_page(
                 )
 
             if (
-                hasattr(response, "render")
-                and callable(response.render)
-                and not getattr(response, "is_rendered", False)
+                isinstance(response, SimpleTemplateResponse)
+                and not response.is_rendered
             ):
                 response.add_post_render_callback(store_response)
-            else:
-                response = store_response(response)
-            return response
+                return response
+            return store_response(response)
 
         return wrapper
 
@@ -254,35 +249,28 @@ def _resolve_tags(
     tags: TagsType,
 ) -> tuple[SurrogateKeySet, list[Versioned], SurrogateKeySet]:
     """
-    Resolve tags to SurrogateKeySet and list of Versioned tags.
+    Resolve tags to surrogate key sets and the list of Versioned tags.
 
     Returns:
-        (resolved_tags, versioned_tags, indexed_tags)
+        (all_tags, versioned_tags, indexed_tags)
     """
-    result = SurrogateKeySet()
+    all_tags = SurrogateKeySet()
     indexed = SurrogateKeySet()
     versioned_list: list[Versioned] = []
 
-    if tags is None:
-        return result, versioned_list, indexed
-
-    for item in tags:
+    for item in tags or []:
         if isinstance(item, Versioned):
             versioned_list.append(item)
-            result.add(item.resolve_name(request))
-        elif isinstance(item, str):
-            result.add(item)
-            indexed.add(item)
-        elif callable(item):
-            keys = item(request)
-            if isinstance(keys, str):
-                result.add(keys)
-                indexed.add(keys)
-            elif keys:
-                result.add(*keys)
-                indexed.add(*keys)
+            all_tags.add(item.resolve_name(request))
+            continue
+        keys = item(request) if callable(item) else item
+        if isinstance(keys, str):
+            keys = [keys]
+        if keys:
+            all_tags.add(*keys)
+            indexed.add(*keys)
 
-    return result, versioned_list, indexed
+    return all_tags, versioned_list, indexed
 
 
 def _build_cache_key(
@@ -325,15 +313,12 @@ def invalidate_tag(tag: str, backend: Optional[str] = None) -> int:
 
 
 def _invalidate_tag(backend: BaseCacheBackend, tag: str) -> int:
-    # A tag can be used by both versioned and ordinary entries. Only ordinary
-    # entries are indexed, so the common version-only path remains O(1).
     version = 0
     try:
         version = backend.increment_group_version(tag)
     except (NotImplementedError, ValueError):
         pass
-    deleted = backend.invalidate_by_surrogate(tag)
-    return deleted or version
+    return backend.invalidate_by_surrogate(tag) or version
 
 
 def invalidate_tags(tags: list[str], backend: Optional[str] = None) -> int:

@@ -1,7 +1,7 @@
 # django-custom-cache-page
 
 [![Python](https://img.shields.io/pypi/pyversions/django-custom-cache-page)](https://pypi.org/project/django-custom-cache-page/)
-[![Django](https://img.shields.io/badge/django-4.2%20%7C%205.0%20%7C%205.1%20%7C%206.0-blue)](https://pypi.org/project/django-custom-cache-page/)
+[![Django](https://img.shields.io/badge/django-4.2%20%7C%205.0%20%7C%205.1%20%7C%205.2%20%7C%206.0-blue)](https://pypi.org/project/django-custom-cache-page/)
 [![Coverage](https://coveralls.io/repos/github/zidsa/django-custom-cache-page/badge.svg?branch=master)](https://coveralls.io/github/zidsa/django-custom-cache-page?branch=master)
 [![License](https://img.shields.io/github/license/zidsa/django-custom-cache-page)](https://github.com/zidsa/django-custom-cache-page/blob/master/LICENSE)
 
@@ -181,6 +181,7 @@ def catalog(request):
 The first response includes a weak `ETag`. A later `If-None-Match` request
 receives a bodyless `304` when the selected representation is unchanged. The
 decorator checks a fresh origin snapshot without running or rendering the view.
+A `Last-Modified` header set by the view is honoured for `If-Modified-Since`.
 An expired snapshot, invalidated tag, `_bust_cache`, or `Cache-Control: no-cache`
 request rebuilds the response before comparing its validator. If that rebuild
 changes the representation, the client receives the complete new `200` body.
@@ -196,14 +197,21 @@ and host, and emits `Vary`. Header values are read from effective `request.META`
 This key isolation also applies when `etag` is false and `vary_on` is supplied.
 The caller must include **every** header that can affect a representation, and
 must use `only_if` to exclude personalized responses or provide appropriate
-identity isolation. There are no application-specific credential rules in the
-package. Surrogate tags group entries for invalidation; ordinary tags do not
-make their cache keys distinct.
+identity isolation; beyond the generic HTTP rules below, the package knows
+nothing about application credentials. Surrogate tags group entries for
+invalidation; ordinary tags do not make their cache keys distinct.
 
-All modes refuse non-GET requests, request `no-store`, and response `private`,
-`no-store`, cookies, or streaming responses. Bypasses emit `Cache-Control:
-no-store`. With HTTP validation enabled, an unsupported `Vary` value (including
-`*`) also prevents storage. `only_if` is evaluated before cache lookup.
+All modes refuse request `no-store` and response `private`, `no-store`,
+cookies, or streaming responses. With `etag` or `vary_on` set, a `Vary` value
+naming a header outside `vary_on` (including `*`) also prevents storage; the
+default mode keeps ignoring `Vary`, as before, to keep one cache lookup and
+unchanged keys. A response to a request carrying `Authorization` is
+stored only when it declares `public`, `s-maxage`, or `must-revalidate`. `HEAD`
+is served from the `GET` snapshot but never stores one; other methods run the
+view directly. An `only_if` or `do_not_cache` bypass adds `Cache-Control:
+no-store` unless the view set its own policy; other responses the decorator
+does not store or serve are returned exactly as the view built them. `only_if`
+is evaluated before cache lookup.
 
 Stored snapshot metadata accounts for origin `Date`, `Age`, explicit
 `max-age`/`s-maxage`, and `Expires`. Each response advertises only remaining
@@ -211,12 +219,13 @@ freshness, capped by `max_age` if provided; time in the origin cache does not
 restart a full freshness interval. When both `max-age` and `s-maxage` exist,
 their smaller remaining lifetime is used conservatively. Ambiguous duplicate
 freshness directives produce zero freshness. Response `no-cache` always requires
-a rebuild. Outbound `Date` is current and `Age` is zero because advertised
-remaining freshness already includes the stored response's age.
+a rebuild. Outbound `Date` is current and any origin `Age` is dropped, because
+the advertised remaining freshness already includes the stored response's age.
 
 The ETag feature flag controls both generation and conditional `304` responses.
-Turning it off never validates a previously tagged entry; turning it on rebuilds
-an entry that lacks a validator. `max_age` affects outgoing freshness, not the
+A view that sets its own `ETag` keeps it as the validator. Turning the flag off
+never validates a previously tagged entry; turning it on rebuilds an entry that
+lacks a validator. `max_age` affects outgoing freshness, not the
 configured cache storage TTL. Stronger response freshness directives can force
 a rebuild before that storage TTL expires.
 
@@ -230,8 +239,7 @@ are emitted by the package.
 #### Upgrading an existing cache
 
 Old response entries without freshness metadata refill once. The default mode
-also gains the request/response safety checks and remaining-freshness behavior
-above; `etag=False` continues to serve full responses without generating a new
+also gains the request/response checks and remaining-freshness behavior above; `etag=False` continues to serve full responses without generating a new
 validator. Existing integer version counters and raw group names are preserved
 for callers using Django's `cache.incr(group)` directly. A missing counter starts
 with a random positive integer generation, preventing old cache entries from
