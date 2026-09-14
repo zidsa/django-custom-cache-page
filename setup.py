@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 with open("README.md") as readme_file:
     README = readme_file.read()
@@ -37,6 +37,7 @@ setup_args = dict(
         "Framework :: Django :: 4.2",
         "Framework :: Django :: 5.0",
         "Framework :: Django :: 5.1",
+        "Framework :: Django :: 5.2",
         "Framework :: Django :: 6.0",
         "Operating System :: OS Independent",
         "License :: OSI Approved :: MIT License",

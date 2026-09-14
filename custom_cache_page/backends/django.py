@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from typing import Any, Optional
 
 from django.core.cache import caches
@@ -67,20 +68,31 @@ class DjangoCacheBackend(BaseCacheBackend):
         )
         for header, value in cached.get("headers", {}).items():
             response[header] = value
+        setattr(response, "_cache_page_metadata", cached.get("metadata", {}))
         return response
 
     def set(self, entry: CacheEntry) -> None:
         response = entry.response
         headers = {}
-        for header in ["Cache-Control", "Expires", "ETag", "Last-Modified", "Vary"]:
+        for header in [
+            "Cache-Control",
+            "Expires",
+            "ETag",
+            "Last-Modified",
+            "Vary",
+            "Content-Language",
+            "Content-Location",
+            "Content-Encoding",
+        ]:
             if header in response:
                 headers[header] = response[header]
 
         serialized = {
-            "content": response.content.decode("utf-8"),
+            "content": response.content,
             "content_type": response.get("Content-Type", "text/html"),
             "status_code": response.status_code,
             "headers": headers,
+            "metadata": entry.metadata,
         }
         self.cache.set(entry.key, serialized, entry.timeout)
         for surrogate in entry.surrogate_keys:
@@ -103,11 +115,10 @@ class DjangoCacheBackend(BaseCacheBackend):
         return count
 
     def get_group_version(self, group: str, timeout: int) -> int:
-        return self.cache.get_or_set(group, 1, timeout=timeout)
+        # An expired counter must not restart at a generation stale entries used.
+        return self.cache.get_or_set(
+            group, lambda: secrets.randbits(60) + 1, timeout=timeout
+        )
 
     def increment_group_version(self, group: str) -> int:
-        try:
-            return self.cache.incr(group)
-        except ValueError:
-            self.cache.set(group, 2)
-            return 2
+        return self.cache.incr(group)

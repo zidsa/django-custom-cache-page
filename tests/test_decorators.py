@@ -1,15 +1,16 @@
 from django.http import HttpResponse
+from django.template.response import SimpleTemplateResponse
 
 from custom_cache_page import (
     Versioned,
     cache_page,
+    conf,
     invalidate_tag,
     invalidate_tags,
     versioned,
 )
 from custom_cache_page.backends.base import BaseCacheBackend
 from custom_cache_page.backends.django import DjangoCacheBackend
-from custom_cache_page import conf
 
 
 class TestVersioned:
@@ -187,7 +188,7 @@ class TestCachePage:
         request = request_factory.get("/timeout-callable")
         response = view(request)
         assert response.status_code == 200
-        assert "max-age=600" in response.get("Cache-Control", "")
+        assert "max-age=600" in response["Cache-Control"]
 
 
 class TestCachePageTags:
@@ -266,18 +267,13 @@ class TestCachePageTags:
         assert response.status_code == 200
 
 
-class DeferredResponse(HttpResponse):
+class DeferredResponse(SimpleTemplateResponse):
     def __init__(self):
-        super().__init__(b"deferred")
-        self._callbacks = []
+        super().__init__(None)
 
-    def render(self):
-        for cb in self._callbacks:
-            cb(self)
-        return self
-
-    def add_post_render_callback(self, callback):
-        self._callbacks.append(callback)
+    @property
+    def rendered_content(self):
+        return "deferred"
 
 
 class TestCachePageDeferredResponse:
@@ -288,7 +284,7 @@ class TestCachePageDeferredResponse:
 
         request = request_factory.get("/deferred-reg")
         response = view(request)
-        assert len(response._callbacks) == 1
+        assert len(response._post_render_callbacks) == 1
 
     def test_post_render_callback_executed(self, request_factory):
         class MemoryBackend(BaseCacheBackend):
